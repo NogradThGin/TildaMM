@@ -825,8 +825,6 @@ static void page_reordered_cb (GtkNotebook  *notebook,
 
 gboolean tilda_window_init (const gchar *config_file, const gint instance, tilda_window *tw)
 {
-    printf("Function: %s\n", __func__);
-
     DEBUG_FUNCTION ("tilda_window_init");
     DEBUG_ASSERT (instance >= 0);
 
@@ -995,35 +993,31 @@ gboolean tilda_window_init (const gchar *config_file, const gint instance, tilda
     /* Position the window */
     tw->current_state = STATE_UP;
 
-    /* Awful code to detect primary monitor and make Tilda spawn on it according to a percentage of the screen width & height */
-
     GdkRectangle rectangle;
+    config_get_configured_window_size (&rectangle);
 
-    gint relative_width = config_getint ("width_percentage") ;
-    gint relative_height = config_getint ("height_percentage") ;
+    gint width = rectangle.width;
+    gint height = rectangle.height;
 
-    gdk_monitor_get_workarea(gdk_display_get_primary_monitor(gdk_display_get_default()), &rectangle);
-
-    double width = (rectangle.width * relative_width) / 100 ;
-    double height = (rectangle.height * relative_height) / 100;
+    gtk_window_set_default_size (GTK_WINDOW(tw->window),
+                                 width,
+                                 height);
 
     gtk_window_resize (GTK_WINDOW(tw->window), width, height);
 
     /* Create GDK resources now, to prevent crashes later on */
     gtk_widget_realize (tw->window);
-    //generate_animation_positions (tw);
+    generate_animation_positions (tw);
 
     /* Initialize wizard window reference to NULL */
     tw->wizard_window = NULL;
 
-    GdkDisplay *dis;
     GdkScreen *screen;
     GdkWindow *root;
     GdkEventMask mask;
 
-    dis = gdk_x11_display_get_xdisplay(gdk_window_get_display(gtk_widget_get_window(tw->window)));
-    screen = gdk_display_get_default_screen(dis);
-    root = gdk_x11_display_get_xdisplay(gdk_window_get_display(gtk_widget_get_window(tw->window)));
+    screen = gtk_widget_get_screen (GTK_WIDGET (tw->window));
+    root = gdk_screen_get_root_window (screen);
 
     mask = gdk_window_get_events (root);
     mask |= GDK_PROPERTY_CHANGE_MASK;
@@ -1037,6 +1031,7 @@ gboolean tilda_window_init (const gchar *config_file, const gint instance, tilda
 
 gint tilda_window_free (tilda_window *tw)
 {
+
     /* Close each tab which still exists.
      * This will free their data structures automatically. */
     if (tw->notebook != NULL) {
@@ -1210,6 +1205,8 @@ gint tilda_window_confirm_quit (tilda_window *tw)
 
 gint tilda_window_find_monitor_number (tilda_window *tw)
 {
+    DEBUG_FUNCTION ("tilda_window_find_monitor_number");
+
     GdkScreen *screen = gtk_widget_get_screen (tw->window);
     gint n_monitors = gdk_screen_get_n_monitors (screen);
 
@@ -1217,7 +1214,7 @@ gint tilda_window_find_monitor_number (tilda_window *tw)
     for(int i = 0; i < n_monitors; ++i) {
         gchar *monitor_name = gdk_screen_get_monitor_plug_name (screen, i);
         if(0 == g_strcmp0 (show_on_monitor, monitor_name)) {
-            return i; gint monitor = tilda_window_find_monitor_number (tw);
+            return i;
         }
     }
 
@@ -1260,33 +1257,45 @@ gint tilda_window_find_centering_coordinate (tilda_window *tw,
 void
 tilda_window_update_window_position (tilda_window *tw)
 {
+    /* UPDATE Multi-Monitor
+     * Completely reworked tilda_window_update_window_position in order to update position in case of pulling down and up Tilda
+     * It will now make Tilda appear on the focus monitor with a size according to width and height percentage in config
+    */
+
+    GdkDisplay *display;
+    GdkDeviceManager *device_manager;
+    GdkDevice *device;
+    GdkRectangle rectangle;
+    GdkMonitor *monitor;
+
+    display = gdk_display_get_default ();
+    device_manager = gdk_display_get_device_manager (display);
+    device = gdk_device_manager_get_client_pointer (device_manager);
+
+    int x, y;
+    gdk_device_get_position (device, NULL, &x, &y);
+    monitor = gdk_display_get_monitor_at_point (display, x, y);
+
+    gdk_monitor_get_geometry(monitor, &rectangle);
+
+    gint relative_width = config_getint ("width_percentage") ;
+    gint relative_height = config_getint ("height_percentage") ;
+
+    double width = (rectangle.width * relative_width) / 100 ;
+    double height = (rectangle.height * relative_height) / 100;
+
+    gtk_window_resize (GTK_WINDOW(tw->window), width, height);
+
     /**
      * If the screen size changed we might also need to recenter the
      * tilda window.
      */
-    gint pos_x, pos_y;
-    gboolean centered_horizontally = config_getbool ("centered_horizontally");
-    gboolean centered_vertically = config_getbool ("centered_vertically");
 
-    if (centered_horizontally) {
-        pos_x = tilda_window_find_centering_coordinate (tw, WIDTH);
-        config_setint ("x_pos", pos_x);
-        pos_y = (gint) config_getint ("y_pos");
-        gtk_window_move (GTK_WINDOW (tw->window), pos_x, pos_y);
-    }
-
-    if (centered_vertically) {
-        pos_y = tilda_window_find_centering_coordinate (tw, HEIGHT);
-        config_setint ("y_pos", pos_y);
-        pos_x = (gint) config_getint ("x_pos");
-        gtk_window_move (GTK_WINDOW (tw->window), pos_x, pos_y);
-    }
+    gtk_window_move (GTK_WINDOW (tw->window), rectangle.x, rectangle.y);
 }
 
 static gboolean update_tilda_window_size (gpointer user_data)
 {
-    printf("Function: %s\n", __func__);
-
     tilda_window *tw = user_data;
 
     g_debug ("Updating tilda window size in idle handler to "

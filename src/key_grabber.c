@@ -159,7 +159,13 @@ void tilda_window_set_active (tilda_window *tw)
 
     XEvent event;
     long mask = SubstructureRedirectMask | SubstructureNotifyMask;
-    gtk_window_move (GTK_WINDOW(tw->window), config_getint ("x_pos"), config_getint ("y_pos"));
+
+    /* UPDATE Multi-Monitor:
+     * gtk_window_move in this function is no longer useful as it will be handled by update_postion function
+    */
+
+    //gtk_window_move (GTK_WINDOW(tw->window), config_getint ("x_pos"), config_getint ("y_pos"));
+
     if (gdk_x11_screen_supports_net_wm_hint (screen,
                                              gdk_atom_intern_static_string ("_NET_ACTIVE_WINDOW")))
     {
@@ -318,36 +324,23 @@ static void pull_down (struct tilda_window_ *tw) {
      * Overriding the user time here seems to work a lot better than calling
      * gtk_window_present_with_time() here, or at the end of the function. I have
      * no idea why, they should do the same thing. */
+
+
+
     gdk_x11_window_set_user_time (gtk_widget_get_window (tw->window),
                                   tomboy_keybinder_get_current_event_time());
     gtk_widget_show (GTK_WIDGET(tw->window));
 
-    /* Awful code in order to detect mouse position and update Tilda position according to monitor where the mouse is */
+    /* Multi-Monitor Update:
+     *      Code to detect mouse position and retrieve current monitor X & Y positions
+     *      to set the Tilda Window on the focused screen
+    */
 
-    GdkDisplay *display;
-    GdkDeviceManager *device_manager;
-    GdkDevice *device;
-    GdkMonitor *monitor;
-    int x, y;
-
-    display = gdk_display_get_default();
-    device_manager = gdk_display_get_device_manager (display);
-    device = gdk_device_manager_get_client_pointer (device_manager);
-
-    gdk_device_get_position (device, NULL, &x, &y);
-    monitor = gdk_display_get_monitor_at_point(display, x, y);
-
-    GdkRectangle rectangle;
-
-    gint relative_width = config_getint ("width_percentage") ;
-    gint relative_height = config_getint ("height_percentage") ;
-
-    gdk_monitor_get_geometry(monitor, &rectangle);
-
-    double width = (rectangle.width * relative_width) / 100 ;
-    double height = (rectangle.height * relative_height) / 100;
-
-    gtk_window_resize (GTK_WINDOW(tw->window), width, height);
+#if GTK_MINOR_VERSION == 16
+        /* Temporary fix for GTK breaking restore on Fullscreen, only needed for
+         * GTK+ version 3.16, since it was fixed early in 3.17 and above. */
+        tilda_window_set_fullscreen(tw);
+#endif
 
     /* The window should maintain its properties when it is merely hidden, but it does
      * not. If you delete the following call, the window will not remain visible
@@ -359,8 +352,8 @@ static void pull_down (struct tilda_window_ *tw) {
             gtk_window_stick (GTK_WINDOW (tw->window));
 
     if (config_getbool ("animation") && !tw->fullscreen) {
-        GdkWindow *x11window;
         GdkDisplay *display;
+        GdkWindow *x11window;
         Atom atom;
         if (!config_getbool ("set_as_desktop")) {
             x11window = gtk_widget_get_window (tw->window);
@@ -396,14 +389,13 @@ static void pull_down (struct tilda_window_ *tw) {
                              (guchar *) &atom, 1);
         }
     } else {
-        gtk_window_move (GTK_WINDOW(tw->window), rectangle.x, rectangle.y);
+        //gtk_window_move (GTK_WINDOW(tw->window), rectangle.x, rectangle.y);
     }
 
     /* Nasty code to make metacity behave. Starting at metacity-2.22 they "fixed" the
      * focus stealing prevention to make the old _NET_WM_USER_TIME hack
      * not work anymore. This is working for now... */
-
-    tilda_window_update_window_position (tw);
+    tilda_window_update_window_position(tw);
     tilda_window_set_active (tw);
 
     if (tw->fullscreen)
